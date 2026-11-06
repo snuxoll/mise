@@ -6,6 +6,7 @@ cat <<EOF >mise.toml
 "apk:bc" = { state = "absent" }
 "brew:jq" = "latest"
 "dnf:bc" = "latest"
+"macports:bc" = "latest"
 "mas:497799835" = "latest"
 "pacman:bc" = "latest"
 "zypper:bc" = "latest"
@@ -23,6 +24,10 @@ assert \
   $'bc\tabsent'
 assert_contains "mise bootstrap packages status --json" '"mas"'
 assert_contains "mise bootstrap packages status --json" '"zypper"'
+assert_contains "mise bootstrap packages status --json" '"macports"'
+if ! command -v port >/dev/null && [[ ! -x /opt/local/bin/port ]]; then
+  assert_fail_contains "mise bootstrap packages apply --manager macports --dry-run --yes" "macports is not available"
+fi
 if ! command -v zypper >/dev/null || ! command -v rpm >/dev/null; then
   assert_fail_contains "mise bootstrap packages apply --manager zypper --dry-run --yes" "zypper is not available"
 fi

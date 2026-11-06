@@ -22,7 +22,7 @@ Pin a version with `@`, as in `apt:curl@8.5.0-2`; without `@`, or with
 cask names (`brew:postgresql@17`, `brew-cask:temurin@17`), so there `@` is
 part of the name. mas takes numeric App Store IDs and nix takes attribute
 paths or flake references, so neither accepts `@version`. aur, flatpak,
-flatpak-user, pacman, and snap accept `@version` but cannot install a pin,
+flatpak-user, macports, pacman, and snap accept `@version` but cannot install a pin,
 so installing skips those entries with a warning.
 
 ## Arguments

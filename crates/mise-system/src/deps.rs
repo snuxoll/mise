@@ -627,6 +627,7 @@ fn install_prefix(mgr: &str) -> &'static str {
         "zypper" => "sudo zypper --non-interactive install ",
         "pacman" => "sudo pacman -S ",
         "apk" => "sudo apk add ",
+        "macports" => "sudo port install ",
         "mas" => "mas install ",
         "scoop" => "scoop install ",
         "choco" => "choco install ",

@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+
+if [[ "$(uname)" != "Darwin" ]]; then
+  exit 0
+fi
+
+# Exercise the real CLI and subprocess boundary without MacPorts installed.
+mkdir -p "$HOME/port-bin"
+export PATH="$HOME/port-bin:$PATH"
+export MISE_SYSTEM_PACKAGES_SUDO=true
+PORT="$HOME/port-bin/port"
+touch "$HOME/port-state" "$HOME/port-log"
+cat >"$PORT" <<'SH'
+#!/bin/sh
+if [ "$1" = -q ] && [ "$2" = installed ]; then
+  [ "$LC_ALL" = C ] || exit 2
+  if [ -f "$HOME/port-error" ]; then
+    echo 'Error: port installed failed: database is locked' >&2
+    exit 1
+  fi
+  if [ -s "$HOME/port-state" ]; then
+    cat "$HOME/port-state"
+  else
+    echo 'None of the specified ports are installed.'
+  fi
+  exit 0
+fi
+echo "$*" >>"$HOME/port-log"
+if [ "$2" = sync ]; then
+  exit "${PORT_SYNC_EXIT:-0}"
+fi
+exit "${PORT_EXIT:-0}"
+SH
+cat >"$HOME/port-bin/sudo" <<'SH'
+#!/bin/sh
+if [ "$1" = -n ] && [ "$2" = true ]; then
+  exit 0
+fi
+# port is run by absolute path, since sudo may reset PATH
+[ "$1" = "$HOME/port-bin/port" ] || exit 99
+shift
+exec "$HOME/port-bin/port" "$@"
+SH
+chmod +x "$HOME/port-bin/"*
+
+cat >mise.toml <<'TOML'
+[bootstrap.packages]
+"macports:bc" = "latest"
+"macports:git" = "2.47.0"
+"macports:ripgrep" = "latest"
+TOML
+# git's active version does not match the pin; bc is installed but inactive.
+printf '  bc @1.07.1_0\n  git @2.46.0_0+perl5_34 (active)\n' >"$HOME/port-state"
+assert_contains "mise bootstrap packages status" "version mismatch"
+assert_fail "mise bootstrap packages status --missing"
+assert_contains "mise bootstrap packages apply --dry-run --update" "$PORT -N sync"
+# A pin cannot be installed, so it is skipped and the rest still installs.
+assert_contains "mise bootstrap packages apply --dry-run 2>&1" "cannot install pinned version 'git@2.47.0'"
+assert_contains "mise bootstrap packages apply --dry-run" "$PORT -N install bc ripgrep"
+assert_succeed "test ! -s '$HOME/port-log'"
+
+# Only missing packages are installed; a requested sync runs first.
+assert_succeed "mise bootstrap packages apply --yes --update"
+assert "cat '$HOME/port-log'" $'-N sync\n-N install bc ripgrep'
+
+# Pins match the version, version_revision, or the whole spec, never a prefix.
+cat >mise.toml <<'TOML'
+[bootstrap.packages]
+"macports:bc" = "1.07.1_0"
+"macports:git" = "2.47.0_1+perl5_34"
+"macports:ripgrep" = "14.1.1"
+TOML
+printf '  bc @1.07.1_0 (active)\n  git @2.47.0_1+perl5_34 (active)\n  ripgrep @14.1.1_2 (active)\n' >"$HOME/port-state"
+: >"$HOME/port-log"
+assert_succeed "mise bootstrap packages status --missing"
+assert_succeed "mise bootstrap packages apply --yes"
+assert_succeed "test ! -s '$HOME/port-log'"
+
+# Upgrade syncs even without --update and excludes missing packages.
+cat >mise.toml <<'TOML'
+[bootstrap.packages]
+"macports:bc" = "latest"
+"macports:git" = "latest"
+"macports:ripgrep" = "latest"
+TOML
+printf '  bc @1.07.1_0 (active)\n  git @2.47.0_1+perl5_34 (active)\n' >"$HOME/port-state"
+assert_succeed "mise bootstrap packages upgrade --yes"
+assert "cat '$HOME/port-log'" $'-N sync\n-N upgrade bc git'
+
+# Declarative removal does not install missing packages or sync.
+cat >mise.toml <<'TOML'
+[bootstrap.packages]
+"macports:git" = { state = "absent" }
+"macports:missing" = { state = "absent" }
+TOML
+: >"$HOME/port-log"
+assert_fail "mise bootstrap packages status --missing"
+assert_contains "mise bootstrap packages apply --dry-run" "$PORT -N uninstall git"
+assert_succeed "test ! -s '$HOME/port-log'"
+assert_succeed "mise bootstrap packages apply --yes"
+assert "cat '$HOME/port-log'" '-N uninstall git'
+
+# Errors from port propagate.
+rm mise.toml
+: >"$HOME/port-state"
+assert_fail "PORT_EXIT=1 mise bootstrap packages apply macports:missing --yes"
+: >"$HOME/port-log"
+assert_fail "PORT_SYNC_EXIT=1 mise bootstrap packages apply macports:missing --update --yes"
+assert "cat '$HOME/port-log'" '-N sync'
+
+# A registry failure is not mistaken for missing packages.
+touch "$HOME/port-error"
+: >"$HOME/port-log"
+assert_fail_contains "mise bootstrap packages apply macports:missing --yes" 'database is locked'
+assert_succeed "test ! -s '$HOME/port-log'"
+rm "$HOME/port-error"
+
+# Pseudo-ports and expressions are rejected before port runs.
+assert_fail_contains "mise bootstrap packages apply macports:outdated --yes" 'pseudo-name or operator'
+assert_fail_contains "mise bootstrap packages apply macports:name:git --yes" 'not a valid port name'
+assert_succeed "test ! -s '$HOME/port-log'"
